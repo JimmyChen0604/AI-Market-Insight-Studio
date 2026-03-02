@@ -127,7 +127,7 @@ build_report_prompt <- function(symbol, company_name, sector, trend, gbm, lattic
   } else "GBM parameters unavailable."
 
   lat_str <- if (!is.null(lattice)) {
-    sprintf("Binomial Lattice (CRR): u=%.6f, d=%.6f, p_real=%.6f, implied sigma=%.4f",
+    sprintf("Binomial Lattice (RWPM): u=%.6f, d=%.6f, p_real=%.6f, sigma=%.4f",
             lattice$u, lattice$d, lattice$p_real, lattice$sigma_annual)
   } else "Lattice parameters unavailable."
 
@@ -389,7 +389,7 @@ build_valuation_html <- function(vm) {
   rows <- list(
     mr("P/E (x)",            lapply(vm$pe_x, function(v) fv(v,1))),
     mr("P/B (x)",            lapply(vm$pb_x, function(v) fv(v,1))),
-    mr("Dividend Yield (%)", lapply(vm$dividend_yield_pct, function(v) fv(v,1))),
+    mr("Dividend Yield (%)", lapply(vm$dividend_yield_pct, function(v) fv(v,2))),
     mr("EV/EBITDA (x)",      lapply(vm$ev_ebitda_x, function(v) fv(v,1))),
     mr("FCF Yield (%)",      lapply(vm$fcf_yield_pct, function(v) fv(v,1)))
   )

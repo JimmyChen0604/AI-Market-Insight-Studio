@@ -196,7 +196,11 @@ gbm_forecast_path <- function(s0, mu_annual, sigma_annual, n_days, start_date, p
 }
 
 # ----------------------------
-# Binomial Lattice (CRR)
+# Binomial Lattice (RWPM - Real-World Probability Measure)
+# Matches Julia VLQuantitativeFinancePackage approach:
+#   u = mean of daily price ratios on up days
+#   d = mean of daily price ratios on down days
+#   p = empirical fraction of up days
 # ----------------------------
 
 estimate_lattice_params <- function(hist_df, T_years = 1/12, N_steps = 22) {
@@ -206,15 +210,25 @@ estimate_lattice_params <- function(hist_df, T_years = 1/12, N_steps = 22) {
   if (length(cl) < 22) return(NULL)
   r <- diff(log(cl)); r <- r[is.finite(r)]
   if (length(r) < 21) return(NULL)
-  mu_a <- mean(r) * 252; sig_a <- sd(r) * sqrt(252)
-  dt <- T_years / N_steps
-  u <- exp(sig_a * sqrt(dt)); d <- 1 / u
-  p_real <- clamp((exp(mu_a * dt) - d) / (u - d), 0.001, 0.999)
-  p_rn <- clamp((exp(RISK_FREE_RATE * dt) - d) / (u - d), 0.001, 0.999)
+
+  ratios <- cl[-1] / cl[-length(cl)]
+  up_idx <- which(r > 0)
+  dn_idx <- which(r <= 0)
+  if (length(up_idx) < 3 || length(dn_idx) < 3) return(NULL)
+
+  u <- mean(ratios[up_idx])
+  d <- mean(ratios[dn_idx])
+  p_real <- length(up_idx) / length(r)
+
+  if (u <= d) return(NULL)
+
+  p_rn <- clamp((exp(RISK_FREE_RATE / 252) - d) / (u - d), 0.001, 0.999)
+  sig_a <- sd(r) * sqrt(252)
+
   list(s0 = tail(cl, 1), last_date = tail(hist_df$Date, 1),
-       T_years = T_years, N_steps = as.integer(N_steps), dt = dt,
+       T_years = T_years, N_steps = as.integer(N_steps), dt = T_years / N_steps,
        u = u, d = d, p_real = p_real, p_rn = p_rn,
-       mu_annual = mu_a, sigma_annual = sig_a, method = "CRR", n_obs = length(r))
+       mu_annual = mean(r) * 252, sigma_annual = sig_a, method = "RWPM", n_obs = length(r))
 }
 
 lattice_forecast_path <- function(s0, u, d, p, N_steps, start_date, p_lo = 0.05, p_hi = 0.95) {
