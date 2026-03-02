@@ -219,16 +219,20 @@ ui <- navbarPage(
     tags$style(app_css),
     tags$link(rel = "stylesheet", href = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"),
     tags$script(HTML("
+      function fixSelectize(id) {
+        var el = document.getElementById(id);
+        if (el && el.selectize) {
+          el.selectize.settings.dropdownParent = 'body';
+          el.selectize.$dropdown.detach().appendTo('body');
+        }
+      }
       $(document).on('shiny:connected', function() {
-        setTimeout(function() {
-          $('#ai_ticker, #news_ticker, #data_ticker').each(function() {
-            var sel = $(this)[0] && $(this)[0].selectize;
-            if (sel) {
-              sel.settings.dropdownParent = 'body';
-              sel.$dropdown.detach().appendTo('body');
-            }
-          });
-        }, 500);
+        setTimeout(function() { fixSelectize('ai_ticker'); fixSelectize('news_ticker'); }, 500);
+      });
+      $(document).on('shiny:value', function(e) {
+        if (e.name === 'data_page_content') {
+          setTimeout(function() { fixSelectize('data_ticker'); }, 300);
+        }
       });
     "))
   ),

@@ -35,11 +35,17 @@ fmt_vol <- function(x) {
 
 load_financial_tables <- function(symbol) {
   app_dir <- getwd()
+  message("[Tables] Loading for ", symbol, " from ", app_dir)
 
-  kf <- tryCatch(read.csv(file.path(app_dir, "key_financials.csv"), stringsAsFactors=FALSE), error=function(e) NULL)
-  cf <- tryCatch(read.csv(file.path(app_dir, "company_financials.csv"), stringsAsFactors=FALSE), error=function(e) NULL)
-  vm <- tryCatch(read.csv(file.path(app_dir, "valuation_metrics.csv"), stringsAsFactors=FALSE), error=function(e) NULL)
+  kf <- tryCatch(read.csv(file.path(app_dir, "key_financials.csv"), stringsAsFactors=FALSE),
+                 error=function(e) { message("[Tables] key_financials.csv error: ", e$message); NULL })
+  cf <- tryCatch(read.csv(file.path(app_dir, "company_financials.csv"), stringsAsFactors=FALSE),
+                 error=function(e) { message("[Tables] company_financials.csv error: ", e$message); NULL })
+  vm <- tryCatch(read.csv(file.path(app_dir, "valuation_metrics.csv"), stringsAsFactors=FALSE),
+                 error=function(e) { message("[Tables] valuation_metrics.csv error: ", e$message); NULL })
 
+  message("[Tables] kf=", if(is.null(kf)) "NULL" else nrow(kf), " cf=", if(is.null(cf)) "NULL" else nrow(cf),
+          " vm=", if(is.null(vm)) "NULL" else nrow(vm))
   if (is.null(kf) || is.null(cf)) return(NULL)
 
   kf_row <- kf[kf$ticker == symbol, ]
