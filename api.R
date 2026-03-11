@@ -248,6 +248,34 @@ fetch_finnhub_news <- function(symbol, api_key, days_back = 7) {
   })
 }
 
+fetch_finnhub_general_news <- function(api_key, days_back = 7) {
+  resp <- tryCatch({
+    request("https://finnhub.io/api/v1/news") |>
+      req_url_query(category = "general", token = api_key) |>
+      req_timeout(20) |> req_perform()
+  }, error = function(e) NULL)
+
+  if (is.null(resp) || resp_status(resp) != 200) return(NULL)
+  arts <- resp_body_json(resp)
+  if (is.null(arts) || length(arts) == 0) return(NULL)
+
+  cutoff <- as.numeric(Sys.time()) - as.integer(days_back) * 86400L
+  arts <- Filter(function(a) (a[["datetime"]][1] %||% 0) >= cutoff, arts)
+  if (length(arts) == 0) return(NULL)
+
+  lapply(arts, function(a) {
+    data.frame(
+      Symbol = "MACRO",
+      Title = a[["headline"]][1] %||% "",
+      Source = a[["source"]][1] %||% "",
+      Published = a[["datetime"]][1] %||% NA,
+      Summary = a[["summary"]][1] %||% "",
+      Url = a[["url"]][1] %||% "",
+      stringsAsFactors = FALSE
+    )
+  })
+}
+
 fetch_finnhub_quote <- function(symbol, api_key) {
   resp <- tryCatch({
     request("https://finnhub.io/api/v1/quote") |>
@@ -280,7 +308,7 @@ fetch_openai_forecast <- function(prompt_text, api_key) {
   if (!nzchar(api_key)) return(list(ok = FALSE, error = "OPENAI_API_KEY not set."))
 
   body <- list(
-    model = "gpt-4o-mini", temperature = 0.2,
+    model = "gpt-4o-mini", temperature = 0, seed = 42L,
     messages = list(
       list(role = "system", content = "You are a concise, finance-focused stock forecaster."),
       list(role = "user", content = prompt_text)
@@ -361,7 +389,7 @@ fetch_ollama_forecast <- function(prompt_text, api_key) {
 call_openai_text <- function(system_prompt, user_prompt, api_key, max_tokens = 1500) {
   if (!nzchar(api_key)) return(NULL)
   body <- list(
-    model = "gpt-4o-mini", temperature = 0.3,
+    model = "gpt-4o-mini", temperature = 0, seed = 42L,
     messages = list(
       list(role = "system", content = system_prompt),
       list(role = "user", content = user_prompt)

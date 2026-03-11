@@ -63,12 +63,14 @@ server <- function(input, output, session) {
       out <- c(out, news)
       Sys.sleep(0.15)
     }
+    macro <- fetch_finnhub_general_news(key, days_back = as.integer(news_days))
+    if (!is.null(macro)) out <- c(out, macro)
     if (length(out) == 0) return(NULL)
     df <- dplyr::bind_rows(out)
     df <- df[!duplicated(df$Title), ]
     df$Published <- as.POSIXct(df$Published, origin = "1970-01-01", tz = "UTC")
     df <- df[order(df$Published, decreasing = TRUE), ]
-    head(df, 400)
+    head(df, 500)
   }
 
   fetch_all_histories <- function() {
@@ -387,21 +389,23 @@ server <- function(input, output, session) {
     report_result(NULL)
 
     withProgress(message = paste("Generating report for", sym), value = 0, {
-      setProgress(0.1, detail = "Computing quantitative models...")
+      setProgress(0.05, detail = "Computing quantitative models...")
       ai_payload(list(
         symbol = sym, window = n_window, trend = trend,
         gbm = gbm, gbm_path = gbm_path,
         lattice = lattice, lattice_path = lattice_path
       ))
 
-      setProgress(0.3, detail = "Fetching fundamentals & AI analysis...")
+      setProgress(0.15, detail = "Analyzing with 6 specialist analysts...")
       result <- generate_stock_report(sym, d, news_data())
+
+      setProgress(0.85, detail = "Synthesizing final report...")
 
       if (!isTRUE(result$ok)) {
         output$ai_error <- renderUI(div(class = "alert alert-danger", result$error %||% "Report generation failed."))
       }
       report_result(result)
-      setProgress(1)
+      setProgress(1, detail = "Report complete")
     })
   }, ignoreInit = TRUE)
 

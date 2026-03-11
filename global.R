@@ -144,6 +144,7 @@ message("---------------------")
 # Source dependent modules (Shiny auto-sources global.R before ui.R/server.R)
 source("api.R", local = FALSE)
 source("models.R", local = FALSE)
+source("agents.R", local = FALSE)
 source("report.R", local = FALSE)
 
 # ----------------------------

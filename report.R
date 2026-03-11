@@ -180,7 +180,7 @@ build_report_prompt <- function(symbol, company_name, sector, trend, gbm, lattic
     "- key_reason: 3-4 sentences explaining the PRIMARY drivers behind the rating, referencing specific financial metrics and model outputs\n",
     "- industry_analysis: a DETAILED paragraph (10-15 sentences minimum) covering: sector overview and market size, competitive landscape and key players (name specific competitors), company's competitive moat and differentiation, technology/product advantages, revenue composition and growth drivers, barriers to entry, regulatory environment, supply chain dynamics, and where this company ranks among peers with specific market share or revenue comparisons\n",
     "- investment_overview: a DETAILED paragraph (10-15 sentences minimum) covering: current valuation assessment citing specific P/E P/B ROE metrics, price momentum analysis (reference the 1d/7d/30d changes), quantitative model interpretation (what the GBM drift and Lattice parameters imply about expected returns), beta and systematic risk exposure (cite the beta value and what it means), historical volatility regime, earnings quality and growth sustainability, balance sheet strength (debt-to-equity), dividend policy, comparison to sector peers, and overall investment thesis tying everything together\n",
-    "- risk_analysis: JSON array of 5-6 SPECIFIC risk factors (each 2-3 sentences with concrete details - mention specific regulatory bodies, competitor names, geographic exposures, supply chain partners, valuation multiples that could compress)\n",
+    "- risk_analysis: JSON array of 5-6 STRINGS, each string is one specific risk factor (2-3 sentences with concrete details). Example: [\"Risk factor one...\", \"Risk factor two...\"]. Do NOT use objects, only plain strings.\n",
     "- bull_case: 4-5 sentences from the bull researcher with specific catalysts, growth opportunities, and upside price scenarios backed by data\n",
     "- bear_case: 4-5 sentences from the bear researcher with specific downside scenarios, competitive threats, and warning signs backed by data\n",
     "- target_price_3m: your 3-month price target as a number\n",
@@ -210,19 +210,32 @@ generate_stock_report <- function(symbol, stock_data_val, news_data_df) {
   mkt <- stock_data_val$daily[stock_data_val$daily$Symbol == MARKET_TICKER, ]
   sim <- compute_sim_params(hist, mkt)
 
-  all_news <- if (!is.null(news_data_df)) {
-    nd <- news_data_df[news_data_df$Symbol == symbol, ]
-    if (nrow(nd) == 0) NULL else head(nd, 15)
-  } else NULL
-  news_text <- build_news_snapshot(symbol, all_news, max_rows = 8)
-
   tables <- tryCatch(build_report_tables(symbol), error = function(e) NULL)
 
-  prompts <- build_report_prompt(symbol, company_name, sector, trend, gbm, lattice, sim,
-                                 news_text, tables)
+  message("[Report] Generating analyst report for ", symbol)
+  report <- tryCatch(
+    run_parallel_agents(symbol, stock_data_val, news_data_df,
+                        trend = trend, gbm = gbm, lattice = lattice, sim = sim),
+    error = function(e) {
+      message("[Report] Parallel analysis error: ", e$message)
+      NULL
+    }
+  )
 
-  api_key <- Sys.getenv("OPENAI_API_KEY")
-  report <- call_openai_text(prompts$system, prompts$user, api_key, max_tokens = 4000)
+  if (is.null(report)) {
+    message("[Report] Using fallback approach for ", symbol)
+    all_news <- if (!is.null(news_data_df)) {
+      nd <- news_data_df[news_data_df$Symbol == symbol, ]
+      if (nrow(nd) == 0) NULL else head(nd, 15)
+    } else NULL
+    news_text <- build_news_snapshot(symbol, all_news, max_rows = 8)
+
+    prompts <- build_report_prompt(symbol, company_name, sector, trend, gbm, lattice, sim,
+                                   news_text, tables)
+    api_key <- Sys.getenv("OPENAI_API_KEY")
+    report <- call_openai_text(prompts$system, prompts$user, api_key, max_tokens = 4000)
+  }
+
   if (is.null(report)) {
     return(list(ok = FALSE, error = "Failed to generate report. Check API key and connectivity."))
   }
@@ -524,7 +537,19 @@ render_report_ui <- function(result) {
         if (is.null(risks) || length(risks) == 0) {
           risks <- list("No risk factors identified")
         } else if (is.data.frame(risks)) {
-          risks <- as.list(apply(risks, 1, paste, collapse = " "))
+          risks <- lapply(seq_len(nrow(risks)), function(i) {
+            vals <- as.character(unlist(risks[i, ]))
+            vals <- vals[!is.na(vals) & nzchar(trimws(vals)) & vals != "NA"]
+            paste(vals, collapse = " ")
+          })
+          risks <- risks[nzchar(trimws(unlist(risks)))]
+          if (length(risks) == 0) risks <- list("No risk factors identified")
+        } else if (is.list(risks) && !is.character(risks)) {
+          risks <- lapply(risks, function(x) {
+            if (is.character(x)) paste(x[!is.na(x)], collapse = " ")
+            else if (is.list(x)) paste(unlist(x)[!is.na(unlist(x))], collapse = " ")
+            else as.character(x)
+          })
         }
         tags$div(
           lapply(seq_along(risks), function(i) {

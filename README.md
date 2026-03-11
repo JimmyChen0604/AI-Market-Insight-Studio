@@ -37,12 +37,13 @@ Benchmark index: **SPY** (S&P 500 ETF)
 - Timestamps in US Eastern Time
 - Clickable article links
 
-### AI Prediction Tab
+### Reporting Tab (AI Multi-Agent)
 - **Geometric Brownian Motion (GBM)** forecast with confidence bands
 - **Binomial Lattice (CRR)** price tree projection
 - **Single Index Model (SIM)** regression against SPY
-- AI-generated trading analysis via OpenAI GPT-4o-mini (fallback: Ollama)
-- News sentiment bias panel
+- **RAG + Parallel Multi-Agent pipeline** — 6 specialist analysts run in parallel via `httr2::req_perform_parallel`, each with role-specific RAG-retrieved CSV data, followed by a Portfolio Manager synthesis phase
+- Automatic fallback to single-call approach if multi-agent pipeline fails
+- Supports OpenAI GPT-4o-mini and Ollama backends
 
 ---
 
@@ -127,20 +128,60 @@ The app is configured for DigitalOcean App Platform with environment variables s
 
 ---
 
+## Multi-Agent Architecture
+
+The reporting pipeline uses a two-phase RAG + parallel multi-agent workflow:
+
+```
+Phase 1 (Parallel):  6 specialist agents run simultaneously
+┌──────────────────┬──────────────────┬──────────────────┐
+│ Fundamentals     │ News Analyst     │ Technical/Quant  │
+│ key_financials   │ news_archive     │ model_parameters │
+│ company_fin      │                  │ historical_prices│
+│ valuation        │                  │ column_dict      │
+├──────────────────┼──────────────────┼──────────────────┤
+│ Bull Researcher  │ Bear Researcher  │ Risk Manager     │
+│ key_financials   │ key_financials   │ model_parameters │
+│ company_fin      │ company_fin      │ credit_metrics   │
+│ recent_news      │ risk_indicators  │                  │
+└──────────────────┴──────────────────┴──────────────────┘
+                          │
+                          ▼
+Phase 2 (Sequential):  Portfolio Manager synthesizes all outputs
+                          │
+                          ▼
+                   Final JSON Report
+         (same schema as single-call approach)
+```
+
+Each agent retrieves only the CSV data relevant to its role (RAG retrieval), receives a focused system prompt, and returns structured JSON. The Portfolio Manager aggregates all 6 outputs into the final report.
+
+If the multi-agent pipeline fails, the system falls back to the original single monolithic LLM call.
+
 ## Project Structure
 
 ```
 .
-├── app.R                           # Main Shiny application
-├── Dockerfile                      # Docker config (rocker/shiny:4.4.0)
+├── app.R                           # Main Shiny entry point
+├── global.R                        # Constants, libraries, API keys, source loading
+├── api.R                           # API functions (Finnhub, Yahoo, OpenAI, Ollama)
+├── models.R                        # Financial models (GBM, Lattice, SIM), caching, export
+├── agents.R                        # RAG retrieval + parallel multi-agent orchestration
+├── report.R                        # Report generation (multi-agent + fallback), HTML rendering
+├── ui.R                            # Shiny UI definition
+├── server.R                        # Shiny server logic
+├── fetch_financials.R              # Yahoo Finance financial data fetcher
 ├── install_packages.R              # R package installer
+├── Dockerfile                      # Docker config (rocker/shiny:4.4.0)
 ├── .env                            # API keys (gitignored)
 ├── .gitignore
-├── restart_app.sh                  # Local restart helper script
 ├── historical_prices.csv           # Exported price data for RAG
 ├── model_parameters.csv            # Exported model params for RAG
-├── news_archive.csv                # Exported news archive for RAG
-├── rag_data_column_dictionary.csv  # Column dictionary
+├── key_financials.csv              # Key financial snapshot for RAG
+├── company_financials.csv          # Multi-year P&L and credit for RAG
+├── valuation_metrics.csv           # Multi-year valuation for RAG
+├── news_archive.csv                # Accumulated news archive for RAG
+├── rag_data_column_dictionary.csv  # Column definitions for model_parameters
 └── data/                           # Local cache (gitignored)
     ├── daily_prices.csv
     ├── news.csv
