@@ -143,16 +143,6 @@ build_news_snapshot <- function(symbol, news_df, max_rows = 5) {
   paste(items, collapse = "\n")
 }
 
-heuristic_news_tone <- function(news_df) {
-  if (is.null(news_df) || nrow(news_df) == 0) return(0)
-  pos <- c("beat", "beats", "upgrade", "growth", "profit", "surge", "strong", "outperform", "positive", "up", "rally", "raise")
-  neg <- c("miss", "lower", "drop", "down", "weak", "risk", "lawsuit", "delay", "loss", "concern", "warning", "fall")
-  corpus <- tolower(paste(paste(news_df$Title, news_df$Summary), collapse = " "))
-  pos_score <- sum(vapply(pos, function(w) sum(grepl(w, corpus, fixed = TRUE)), integer(1)))
-  neg_score <- sum(vapply(neg, function(w) sum(grepl(w, corpus, fixed = TRUE)), integer(1)))
-  pos_score - neg_score
-}
-
 # ----------------------------
 # GBM (Geometric Brownian Motion)
 # ----------------------------
@@ -410,30 +400,3 @@ update_rag_history <- function(daily_df, start_date = "2026-02-01") {
   result
 }
 
-# ----------------------------
-# forecast prompt (pure data, no news bias)
-# ----------------------------
-
-build_forecast_prompt <- function(symbol, window_days, trend, news_text, tone_score) {
-  paste(
-    sprintf("Forecast: %s, time horizon %d trading days.", symbol, window_days),
-    sprintf(
-      "Price metrics: Latest close %s, 1d %s, 7d %s, 30d %s, 1y(last %d days approx) %s, Volatility(annualized 20d) %s.",
-      fmt_price(trend$latest),
-      fmt_pct(trend$change1d_pct), fmt_pct(trend$change7d_pct),
-      fmt_pct(trend$change30d_pct), min(window_days, 252),
-      fmt_pct(trend$changeN_pct),
-      ifelse(is.na(trend$mean_20d_volatility), "N/A", paste0(trend$mean_20d_volatility, "%"))
-    ),
-    paste("Latest company news text:", news_text, "."),
-    paste(
-      "Return JSON exactly with keys:",
-      "trend (UP/DOWN/NEUTRAL), confidence (0-100),",
-      "forecast_signal (UP / DOWN / FLAT),",
-      "reasoning (3 bullets max in one JSON array),",
-      "expected_price_level (short text),",
-      "risk_note (short text)."
-    ),
-    sep = "\n"
-  )
-}

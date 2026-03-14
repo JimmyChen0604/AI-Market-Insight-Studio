@@ -1,5 +1,5 @@
 # api.R
-# API interaction functions: Finnhub, Yahoo Finance, OpenAI, Ollama
+# API interaction functions: Finnhub, Yahoo Finance, OpenAI
 
 # ----------------------------
 # Yahoo Finance
@@ -301,90 +301,8 @@ fetch_all_quotes <- function(api_key, tickers = TICKERS) {
 }
 
 # ----------------------------
-# LLM (OpenAI / Ollama)
+# LLM (OpenAI)
 # ----------------------------
-
-fetch_openai_forecast <- function(prompt_text, api_key) {
-  if (!nzchar(api_key)) return(list(ok = FALSE, error = "OPENAI_API_KEY not set."))
-
-  body <- list(
-    model = "gpt-4o-mini", temperature = 0, seed = 42L,
-    messages = list(
-      list(role = "system", content = "You are a concise, finance-focused stock forecaster."),
-      list(role = "user", content = prompt_text)
-    ),
-    response_format = list(type = "json_object"),
-    max_tokens = 700
-  )
-
-  resp <- tryCatch({
-    request("https://api.openai.com/v1/chat/completions") |>
-      req_headers(Authorization = paste0("Bearer ", api_key), "Content-Type" = "application/json") |>
-      req_body_json(body) |> req_perform()
-  }, error = function(e) list(ok = FALSE, error = conditionMessage(e)))
-
-  if (!inherits(resp, "httr2_response")) return(resp)
-  if (resp_status(resp) != 200) return(list(ok = FALSE, error = resp_body_string(resp)))
-
-  raw <- resp_body_json(resp)
-  text <- raw$choices[[1]]$message$content
-  if (is.null(text) || !nzchar(text)) return(list(ok = FALSE, error = "Empty response from OpenAI."))
-
-  text <- gsub("^```json|```$", "", trimws(text))
-  parsed <- tryCatch(jsonlite::fromJSON(text), error = function(e) NULL)
-  if (is.null(parsed)) return(list(ok = FALSE, error = "Invalid JSON returned by OpenAI.", raw = text))
-  list(ok = TRUE, payload = parsed, raw = text)
-}
-
-fetch_ollama_forecast <- function(prompt_text, api_key) {
-  use_local <- !nzchar(api_key) || trimws(tolower(api_key)) == "local"
-  model <- Sys.getenv("OLLAMA_MODEL", "llama3.1:8b")
-
-  req <- if (use_local) {
-    tryCatch({
-      request("http://localhost:11434/v1/chat/completions") |>
-        req_headers(`Content-Type` = "application/json") |>
-        req_body_json(list(
-          model = model,
-          messages = list(
-            list(role = "system", content = "You are a concise, finance-focused stock forecaster."),
-            list(role = "user", content = prompt_text)
-          ), temperature = 0.2, max_tokens = 700
-        )) |> req_perform()
-    }, error = function(e) NULL)
-  } else {
-    tryCatch({
-      request("https://ollama.com/v1/chat/completions") |>
-        req_headers(Authorization = paste0("Bearer ", api_key), `Content-Type` = "application/json") |>
-        req_body_json(list(
-          model = "gpt-oss:20b-cloud",
-          messages = list(
-            list(role = "system", content = "You are a concise, finance-focused stock forecaster."),
-            list(role = "user", content = prompt_text)
-          ), temperature = 0.2, max_tokens = 700
-        )) |> req_perform()
-    }, error = function(e) NULL)
-  }
-
-  if (!inherits(req, "httr2_response")) return(list(ok = FALSE, error = "Ollama request failed."))
-  if (resp_status(req) != 200) return(list(ok = FALSE, error = resp_body_string(req)))
-
-  raw <- tryCatch(resp_body_json(req), error = function(e) NULL)
-  text <- NULL
-  if (!is.null(raw)) {
-    if (!is.null(raw$choices) && length(raw$choices) > 0) {
-      text <- raw$choices[[1]]$message$content
-    } else if (!is.null(raw$message) && !is.null(raw$message$content)) {
-      text <- raw$message$content
-    }
-  }
-  if (is.null(text) || !nzchar(text)) return(list(ok = FALSE, error = "Empty response from Ollama."))
-
-  text <- gsub("^```json|```$", "", trimws(text))
-  parsed <- tryCatch(jsonlite::fromJSON(text), error = function(e) NULL)
-  if (is.null(parsed)) return(list(ok = FALSE, error = "Invalid JSON returned by Ollama.", raw = text))
-  list(ok = TRUE, payload = parsed, raw = text, via = "ollama")
-}
 
 call_openai_text <- function(system_prompt, user_prompt, api_key, max_tokens = 1500) {
   if (!nzchar(api_key)) return(NULL)

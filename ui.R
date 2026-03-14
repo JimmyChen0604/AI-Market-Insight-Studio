@@ -206,6 +206,12 @@ app_css <- HTML("
     .tab-content { padding: 60px 10px 16px; }
     .section-title { font-size: 18px; }
     .metric-value { font-size: 22px; }
+    .panel-card { padding: 14px; border-radius: 12px; }
+  }
+  @media (max-width: 480px) {
+    .metric-card { flex: 1 1 100% !important; }
+    .panel-card { padding: 10px; }
+    .forecast-title { font-size: 16px; }
   }
 ")
 
@@ -251,7 +257,8 @@ ui <- navbarPage(
         class = "panel-card", style = "margin-top:4px; padding:16px 20px;",
         fluidRow(
           column(3, selectInput("news_ticker", "Filter by Stock",
-                                choices = c("ALL" = "ALL", setNames(names(TICKER_LABELS), paste0(names(TICKER_LABELS), " - ", TICKER_LABELS))),
+                                choices = c("ALL" = "ALL", "MACRO - Geopolitical/Macro" = "MACRO",
+                                            setNames(names(TICKER_LABELS), paste0(names(TICKER_LABELS), " - ", TICKER_LABELS))),
                                 selected = "ALL")),
           column(3, radioButtons("news_window", "Date Range",
                                  choices = c("7D" = 7L, "30D" = 30L, "90D" = 90L),
@@ -281,9 +288,11 @@ ui <- navbarPage(
           column(3, radioButtons("forecast_window", "Forecast Window",
                                  choices = c("7D" = 7L, "30D" = 30L, "90D" = 90L),
                                  selected = 30L, inline = TRUE)),
-          column(3, tags$div(style = "padding-top:24px;",
+          column(3, tags$div(style = "padding-top:24px; display:flex; gap:8px; align-items:center;",
             actionButton("run_prediction", tags$span(icon("wand-magic-sparkles"), " Generate Report"),
-                         class = "btn-success")
+                         class = "btn-success"),
+            downloadButton("download_report", tags$span(icon("file-arrow-down")),
+                           class = "btn-info", style = "padding:8px 14px; border-radius:10px;")
           )),
           column(3, tags$div(style = "padding-top:28px; color:#64748b; font-size:12px;",
             icon("robot", style = "margin-right:4px;color:#818cf8;"),

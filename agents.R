@@ -147,6 +147,7 @@ PM_SYSTEM_PROMPT <- paste0(
   "technology advantages, revenue drivers, barriers to entry, regulatory environment\n",
   "- investment_overview: 10-15 sentences covering valuation assessment, price momentum, quant model interpretation, ",
   "beta exposure, volatility regime, earnings quality, balance sheet strength, dividend policy, peer comparison\n",
+  "- macro_environment: 6-8 sentences analyzing the current macro/geopolitical landscape and its specific impact on this stock. Cover: interest rates, trade policy/tariffs, geopolitical tensions, regulatory changes, commodity prices, currency effects. Reference specific events from the news analyst's macro_impact report.\n",
   "- risk_analysis: JSON array of 5-6 STRINGS, each string is one specific risk factor (2-3 sentences). Example: [\"Risk factor one text...\", \"Risk factor two text...\"]. Do NOT use objects, only plain strings.\n",
   "- bull_case: 4-5 sentences from the bull researcher's thesis with catalysts and upside target\n",
   "- bear_case: 4-5 sentences from the bear researcher's thesis with risks and downside target\n",
@@ -319,7 +320,8 @@ build_agent_request <- function(system_prompt, user_content, api_key,
       `Content-Type` = "application/json"
     ) |>
     req_body_json(body) |>
-    req_timeout(60)
+    req_timeout(60) |>
+    req_retry(max_tries = 2, backoff = ~ 2)
 }
 
 # ----------------------------
@@ -335,14 +337,19 @@ parse_agent_response <- function(resp) {
   raw <- tryCatch(resp_body_json(resp), error = function(e) NULL)
   if (is.null(raw)) return(NULL)
 
+  tokens <- raw$usage
   text <- raw$choices[[1]]$message$content
   if (is.null(text) || !nzchar(text)) return(NULL)
 
   text <- gsub("^```json|```$", "", trimws(text))
-  tryCatch(jsonlite::fromJSON(text), error = function(e) {
+  result <- tryCatch(jsonlite::fromJSON(text), error = function(e) {
     message("[Agent] JSON parse failed: ", e$message)
     NULL
   })
+  if (!is.null(result) && !is.null(tokens)) {
+    attr(result, "tokens") <- tokens
+  }
+  result
 }
 
 # ----------------------------
@@ -441,7 +448,8 @@ run_phase2_pm <- function(symbol, company_name, sector, agent_outputs, api_key) 
 # ----------------------------
 
 run_parallel_agents <- function(symbol, stock_data_val, news_data_df,
-                                trend = NULL, gbm = NULL, lattice = NULL, sim = NULL) {
+                                trend = NULL, gbm = NULL, lattice = NULL, sim = NULL,
+                                on_progress = NULL) {
   company_name <- TICKER_LABELS[[symbol]] %||% symbol
   sector <- SECTOR_MAP[[symbol]] %||% "Unknown"
 
@@ -460,17 +468,36 @@ run_parallel_agents <- function(symbol, stock_data_val, news_data_df,
     )
   }
 
+  if (is.function(on_progress)) on_progress(0.20, "Running 6 specialist analysts in parallel...")
   agent_outputs <- run_phase1_parallel(symbol, company_name, sector, trend_text, api_key)
   if (is.null(agent_outputs) || all(vapply(agent_outputs, is.null, logical(1)))) {
     message("[Agents] Phase 1 failed, falling back to single-call approach")
     return(NULL)
   }
 
+  total_tokens <- list(prompt = 0L, completion = 0L, total = 0L)
+  for (out in agent_outputs) {
+    tk <- attr(out, "tokens")
+    if (!is.null(tk)) {
+      total_tokens$prompt <- total_tokens$prompt + (tk$prompt_tokens %||% 0)
+      total_tokens$completion <- total_tokens$completion + (tk$completion_tokens %||% 0)
+      total_tokens$total <- total_tokens$total + (tk$total_tokens %||% 0)
+    }
+  }
+
+  if (is.function(on_progress)) on_progress(0.70, "Portfolio Manager synthesizing final report...")
   report <- run_phase2_pm(symbol, company_name, sector, agent_outputs, api_key)
   if (is.null(report)) {
     message("[Agents] Phase 2 failed, falling back to single-call approach")
     return(NULL)
   }
 
-  report
+  tk <- attr(report, "tokens")
+  if (!is.null(tk)) {
+    total_tokens$prompt <- total_tokens$prompt + (tk$prompt_tokens %||% 0)
+    total_tokens$completion <- total_tokens$completion + (tk$completion_tokens %||% 0)
+    total_tokens$total <- total_tokens$total + (tk$total_tokens %||% 0)
+  }
+
+  list(report = report, agent_outputs = agent_outputs, total_tokens = total_tokens)
 }

@@ -180,6 +180,7 @@ build_report_prompt <- function(symbol, company_name, sector, trend, gbm, lattic
     "- key_reason: 3-4 sentences explaining the PRIMARY drivers behind the rating, referencing specific financial metrics and model outputs\n",
     "- industry_analysis: a DETAILED paragraph (10-15 sentences minimum) covering: sector overview and market size, competitive landscape and key players (name specific competitors), company's competitive moat and differentiation, technology/product advantages, revenue composition and growth drivers, barriers to entry, regulatory environment, supply chain dynamics, and where this company ranks among peers with specific market share or revenue comparisons\n",
     "- investment_overview: a DETAILED paragraph (10-15 sentences minimum) covering: current valuation assessment citing specific P/E P/B ROE metrics, price momentum analysis (reference the 1d/7d/30d changes), quantitative model interpretation (what the GBM drift and Lattice parameters imply about expected returns), beta and systematic risk exposure (cite the beta value and what it means), historical volatility regime, earnings quality and growth sustainability, balance sheet strength (debt-to-equity), dividend policy, comparison to sector peers, and overall investment thesis tying everything together\n",
+    "- macro_environment: 6-8 sentences on the current macro/geopolitical landscape (tariffs, interest rates, trade policy, geopolitical tensions) and how they specifically impact this company\n",
     "- risk_analysis: JSON array of 5-6 STRINGS, each string is one specific risk factor (2-3 sentences with concrete details). Example: [\"Risk factor one...\", \"Risk factor two...\"]. Do NOT use objects, only plain strings.\n",
     "- bull_case: 4-5 sentences from the bull researcher with specific catalysts, growth opportunities, and upside price scenarios backed by data\n",
     "- bear_case: 4-5 sentences from the bear researcher with specific downside scenarios, competitive threats, and warning signs backed by data\n",
@@ -195,7 +196,7 @@ build_report_prompt <- function(symbol, company_name, sector, trend, gbm, lattic
 # Generate full report for one stock
 # ----------------------------
 
-generate_stock_report <- function(symbol, stock_data_val, news_data_df) {
+generate_stock_report <- function(symbol, stock_data_val, news_data_df, on_progress = NULL) {
   company_name <- TICKER_LABELS[[symbol]] %||% symbol
   sector <- SECTOR_MAP[[symbol]] %||% "Unknown"
 
@@ -213,17 +214,30 @@ generate_stock_report <- function(symbol, stock_data_val, news_data_df) {
   tables <- tryCatch(build_report_tables(symbol), error = function(e) NULL)
 
   message("[Report] Generating analyst report for ", symbol)
-  report <- tryCatch(
+  agent_outputs <- NULL
+  total_tokens <- NULL
+
+  pipeline_result <- tryCatch(
     run_parallel_agents(symbol, stock_data_val, news_data_df,
-                        trend = trend, gbm = gbm, lattice = lattice, sim = sim),
+                        trend = trend, gbm = gbm, lattice = lattice, sim = sim,
+                        on_progress = on_progress),
     error = function(e) {
       message("[Report] Parallel analysis error: ", e$message)
       NULL
     }
   )
 
+  if (!is.null(pipeline_result) && !is.null(pipeline_result$report)) {
+    report <- pipeline_result$report
+    agent_outputs <- pipeline_result$agent_outputs
+    total_tokens <- pipeline_result$total_tokens
+  } else {
+    report <- NULL
+  }
+
   if (is.null(report)) {
     message("[Report] Using fallback approach for ", symbol)
+    if (is.function(on_progress)) on_progress(0.50, "Using fallback single-call approach...")
     all_news <- if (!is.null(news_data_df)) {
       nd <- news_data_df[news_data_df$Symbol == symbol, ]
       if (nrow(nd) == 0) NULL else head(nd, 15)
@@ -242,7 +256,8 @@ generate_stock_report <- function(symbol, stock_data_val, news_data_df) {
 
   list(
     ok = TRUE, symbol = symbol, company_name = company_name, sector = sector,
-    report = report, tables = tables,
+    report = report, tables = tables, agent_outputs = agent_outputs,
+    total_tokens = total_tokens,
     trend = trend, gbm = gbm, lattice = lattice, sim = sim
   )
 }
@@ -503,6 +518,15 @@ render_report_ui <- function(result) {
       tags$p(style = "color:#d1d5db; font-size:14px; line-height:1.85; margin:0;", safe_text(r$investment_overview))
     ),
 
+    # ---- Macro Environment ----
+    tags$div(
+      class = "panel-card", style = "margin-bottom:18px;",
+      tags$h4(style = "color:#f1f5f9; margin-bottom:10px; font-size:15px; font-weight:700; display:flex; align-items:center; gap:8px;",
+        icon("globe", style = "color:#38bdf8; font-size:15px;"), "Macro Environment"),
+      tags$p(style = "color:#d1d5db; font-size:14px; line-height:1.85; margin:0;",
+             safe_text(r$macro_environment, "No macro environment analysis available."))
+    ),
+
     # ---- Bull vs Bear ----
     tags$div(style = "margin-bottom:18px;",
       fluidRow(
@@ -562,6 +586,9 @@ render_report_ui <- function(result) {
       }
     ),
 
+    # ---- Agent Transparency Panel ----
+    build_agent_panel(result$agent_outputs),
+
     # ---- End of Report ----
     tags$div(
       style = "margin:24px 0 16px; text-align:center; padding:12px; border-top:1px solid rgba(99,102,241,0.1);",
@@ -570,6 +597,130 @@ render_report_ui <- function(result) {
              sprintf("End of Report  |  %s (%s)  |  Generated %s  |  AI Multi-Analyst Team",
                      sym, company, format(Sys.time(), "%Y-%m-%d %H:%M ET", tz = "America/New_York")))
     )
+  )
+}
+
+# ----------------------------
+# Agent Transparency Panel (collapsible per-agent outputs)
+# ----------------------------
+
+build_agent_panel <- function(agent_outputs) {
+  if (is.null(agent_outputs)) return(NULL)
+  agent_meta <- list(
+    fundamentals = list(icon = "calculator", color = "#60a5fa", title = "Fundamentals Analyst"),
+    news         = list(icon = "newspaper",  color = "#fbbf24", title = "News & Macro Analyst"),
+    technical    = list(icon = "chart-line",  color = "#a78bfa", title = "Technical Analyst"),
+    bull         = list(icon = "arrow-trend-up",   color = "#4ade80", title = "Bull Researcher"),
+    bear         = list(icon = "arrow-trend-down", color = "#f87171", title = "Bear Researcher"),
+    risk         = list(icon = "shield-halved",    color = "#fb923c", title = "Risk Manager")
+  )
+  panels <- lapply(names(agent_outputs), function(atype) {
+    out <- agent_outputs[[atype]]
+    if (is.null(out)) return(NULL)
+    meta <- agent_meta[[atype]]
+    if (is.null(meta)) return(NULL)
+    content_items <- lapply(names(out), function(key) {
+      val <- out[[key]]
+      val_text <- if (is.character(val) && length(val) == 1) {
+        val
+      } else if (is.numeric(val) && length(val) == 1) {
+        as.character(val)
+      } else if (is.character(val) && length(val) > 1) {
+        paste0("\u2022 ", val, collapse = "\n")
+      } else if (is.list(val)) {
+        paste0("\u2022 ", unlist(val), collapse = "\n")
+      } else {
+        paste(as.character(val), collapse = " ")
+      }
+      tags$div(style = "margin-bottom:10px;",
+        tags$span(style = "color:#a5b4fc; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.5px;",
+                  gsub("_", " ", key)),
+        tags$p(style = "color:#d1d5db; font-size:13px; line-height:1.7; margin:4px 0 0; white-space:pre-line;", val_text))
+    })
+    tags$details(style = "margin-bottom:6px; border:1px solid rgba(99,102,241,0.12); border-radius:10px; overflow:hidden;",
+      tags$summary(style = "padding:10px 16px; cursor:pointer; display:flex; align-items:center; gap:8px; background:rgba(30,41,59,0.3); color:#f1f5f9; font-weight:600; font-size:13px;",
+        icon(meta$icon, style = sprintf("color:%s;", meta$color)), meta$title),
+      tags$div(style = "padding:14px 16px; background:rgba(15,23,42,0.3);", content_items))
+  })
+  panels <- Filter(Negate(is.null), panels)
+  if (length(panels) == 0) return(NULL)
+  tags$div(class = "panel-card", style = "margin-bottom:18px;",
+    tags$h4(style = "color:#f1f5f9; margin-bottom:12px; font-size:15px; font-weight:700; display:flex; align-items:center; gap:8px;",
+      icon("users", style = "color:#818cf8; font-size:15px;"), "Analyst Panel",
+      tags$span(style = "font-size:12px; color:#64748b; font-weight:400; margin-left:4px;", "(click to expand)")),
+    tags$div(panels))
+}
+
+# ----------------------------
+# Downloadable HTML report
+# ----------------------------
+
+build_report_download_html <- function(result) {
+  r <- result$report
+  sym <- result$symbol
+  company <- result$company_name
+  sector <- result$sector %||% ""
+  rating <- toupper(safe_text(r$purchase_rating, "HOLD"))
+  conf <- safe_na(r$confidence); if (is.na(conf)) conf <- 50
+  target <- safe_na(r$target_price_3m)
+  rlevel <- safe_text(r$risk_level, "Medium")
+  trend_dir <- safe_text(r$forecast_trend, "NEUTRAL")
+
+  esc <- function(x) htmltools::htmlEscape(x)
+
+  risks <- r$risk_analysis
+  if (is.null(risks) || length(risks) == 0) {
+    risks <- list("No risk factors identified")
+  } else if (is.data.frame(risks)) {
+    risks <- lapply(seq_len(nrow(risks)), function(i) {
+      vals <- as.character(unlist(risks[i, ]))
+      vals <- vals[!is.na(vals) & nzchar(trimws(vals)) & vals != "NA"]
+      paste(vals, collapse = " ")
+    })
+  } else if (is.list(risks) && !is.character(risks)) {
+    risks <- lapply(risks, function(x) paste(unlist(x)[!is.na(unlist(x))], collapse = " "))
+  }
+  risks_html <- paste(sapply(seq_along(risks), function(i) {
+    paste0('<div style="padding:4px 0;"><strong>', i, '.</strong> ', esc(safe_text(risks[[i]])), '</div>')
+  }), collapse = "\n")
+
+  target_txt <- if (!is.na(target)) sprintf("$%.0f", target) else "N/A"
+  generated_at <- format(Sys.time(), "%Y-%m-%d %H:%M ET", tz = "America/New_York")
+
+  paste0(
+    '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n',
+    '<title>Equity Research Report - ', sym, ' (', esc(company), ')</title>\n',
+    '<style>\n',
+    'body{font-family:"Segoe UI",Arial,sans-serif;max-width:820px;margin:0 auto;padding:28px;color:#1e293b;line-height:1.75;}\n',
+    'h1,h2{color:#0f172a;} h1{border-bottom:3px solid #6366f1;padding-bottom:8px;}\n',
+    'h2{border-bottom:1px solid #cbd5e1;padding-bottom:4px;margin-top:28px;}\n',
+    '.badge{display:inline-block;padding:8px 24px;border-radius:8px;font-size:22px;font-weight:800;background:#e0e7ff;color:#3730a3;}\n',
+    '.meta{color:#64748b;font-size:14px;margin:8px 0 16px;}\n',
+    '.bull{border-left:4px solid #16a34a;padding:12px 16px;margin:8px 0;background:#f0fdf4;}\n',
+    '.bear{border-left:4px solid #dc2626;padding:12px 16px;margin:8px 0;background:#fef2f2;}\n',
+    'table{border-collapse:collapse;width:100%;margin:12px 0;}\n',
+    'th,td{padding:8px 12px;border:1px solid #e2e8f0;text-align:left;font-size:14px;}\n',
+    'th{background:#f8fafc;font-weight:600;}\n',
+    '.footer{margin-top:32px;padding-top:12px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:12px;text-align:center;}\n',
+    '</style>\n</head>\n<body>\n',
+    '<h1>', esc(company), ' (', sym, ') &mdash; Equity Research Report</h1>\n',
+    '<div class="meta">Sector: ', esc(sector), ' | Generated: ', generated_at, '</div>\n',
+    '<div class="badge">', rating, '</div>\n',
+    '<span style="margin-left:16px;font-size:15px;">Confidence: ', conf, '% | Risk: ', esc(rlevel),
+    ' | 3M Target: ', target_txt, ' | Trend: ', trend_dir, '</span>\n',
+    '<h2>Key Reason</h2>\n<p>', esc(safe_text(r$key_reason)), '</p>\n',
+    '<h2>Industry Analysis</h2>\n<p>', esc(safe_text(r$industry_analysis)), '</p>\n',
+    '<h2>Investment Overview</h2>\n<p>', esc(safe_text(r$investment_overview)), '</p>\n',
+    '<h2>Macro Environment</h2>\n<p>', esc(safe_text(r$macro_environment, "No macro analysis available.")), '</p>\n',
+    '<div style="display:flex;gap:16px;margin:16px 0;">\n',
+    '<div class="bull" style="flex:1;"><h3 style="color:#16a34a;margin-top:0;">Bull Case</h3><p>',
+    esc(safe_text(r$bull_case)), '</p></div>\n',
+    '<div class="bear" style="flex:1;"><h3 style="color:#dc2626;margin-top:0;">Bear Case</h3><p>',
+    esc(safe_text(r$bear_case)), '</p></div>\n</div>\n',
+    '<h2>Risk Analysis</h2>\n', risks_html, '\n',
+    '<div class="footer">End of Report | ', sym, ' (', esc(company), ') | ', generated_at,
+    ' | AI Multi-Analyst Team</div>\n',
+    '</body>\n</html>'
   )
 }
 

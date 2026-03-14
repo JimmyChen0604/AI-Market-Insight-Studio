@@ -13,6 +13,7 @@ server <- function(input, output, session) {
   last_updated <- reactiveVal("")
   rag_history <- reactiveVal(NULL)
   report_result <- reactiveVal(NULL)
+  report_cache <- reactiveVal(list())
 
   cached <- load_cached_data()
   if (!is.null(cached)) {
@@ -249,10 +250,11 @@ server <- function(input, output, session) {
             column(3, selectInput("data_ticker", "Select Stock",
                                   choices = setNames(TICKERS, paste0(TICKERS, " - ", TICKER_LABELS[TICKERS])),
                                   selected = "AAPL", width = "100%")),
-            column(3, radioButtons("data_window", "Time Range", choices = c("7D", "1M", "1Y"), selected = "1M", inline = TRUE)),
+            column(2, radioButtons("data_window", "Time Range", choices = c("7D", "1M", "1Y"), selected = "1M", inline = TRUE)),
+            column(2, radioButtons("chart_type", "Chart", choices = c("Line" = "line", "Candle" = "candle"), selected = "line", inline = TRUE)),
             column(3, tags$div(style = "padding-top:24px;",
               actionButton("refresh_data", tags$span(icon("sync"), " Refresh Data"), class = "btn-primary"))),
-            column(3, tags$div(style = "padding-top:28px; color:#64748b; font-size:12px;",
+            column(2, tags$div(style = "padding-top:28px; color:#64748b; font-size:12px;",
               icon("clock", style = "margin-right:4px;"), textOutput("last_updated", inline = TRUE)))
           )
         ),
@@ -288,32 +290,44 @@ server <- function(input, output, session) {
   output$price_chart <- renderPlotly({
     sub <- selected_history()
     if (is.null(sub) || nrow(sub) < 2) return(NULL)
-    x <- sub$Date; y <- sub$Close
-    first <- head(y, 1); last <- tail(y, 1)
-    plot_ly(sub, x = x, y = y, type = "scatter", mode = "lines",
-            name = "Close", line = list(color = "#60a5fa", width = 3)) |>
-      add_trace(x = x, y = y, type = "scatter", mode = "markers",
-                marker = list(color = "#93c5fd", size = 4), showlegend = FALSE, name = "Points") |>
-      add_trace(x = x[1], y = first, type = "scatter", mode = "markers",
-                marker = list(color = "#34d399", size = 8), name = "Start") |>
-      add_trace(x = x[length(x)], y = last, type = "scatter", mode = "markers",
-                marker = list(color = "#f97316", size = 8), name = "End") |>
-      layout(
-        title = list(text = paste(TICKER_LABELS[[input$data_ticker]], "-", input$data_window),
-                     font = list(color = "#e5e7eb", size = 16, family = "Inter, sans-serif")),
-        paper_bgcolor = "rgba(0,0,0,0)", plot_bgcolor = "rgba(0,0,0,0)",
-        xaxis = list(title = "", gridcolor = "rgba(51,65,85,0.5)", color = "#94a3b8",
-                     tickformat = "%Y-%m-%d", tickfont = list(size = 11),
-                     zeroline = FALSE, showline = FALSE),
-        yaxis = list(title = "Price (USD)", gridcolor = "rgba(51,65,85,0.5)", color = "#94a3b8",
-                     tickprefix = "$", tickfont = list(size = 11),
-                     zeroline = FALSE, showline = FALSE),
-        font = list(color = "#e2e8f0", family = "Inter, sans-serif"),
-        legend = list(orientation = "h", y = -0.12,
-                      font = list(color = "#94a3b8", size = 12, family = "Inter, sans-serif")),
-        margin = list(t = 50, b = 60),
-        hovermode = "x unified"
-      )
+
+    chart_mode <- input$chart_type %||% "line"
+    common_layout <- list(
+      title = list(text = paste(TICKER_LABELS[[input$data_ticker]], "-", input$data_window),
+                   font = list(color = "#e5e7eb", size = 16, family = "Inter, sans-serif")),
+      paper_bgcolor = "rgba(0,0,0,0)", plot_bgcolor = "rgba(0,0,0,0)",
+      xaxis = list(title = "", gridcolor = "rgba(51,65,85,0.5)", color = "#94a3b8",
+                   tickformat = "%Y-%m-%d", tickfont = list(size = 11),
+                   zeroline = FALSE, showline = FALSE, rangeslider = list(visible = FALSE)),
+      yaxis = list(title = "Price (USD)", gridcolor = "rgba(51,65,85,0.5)", color = "#94a3b8",
+                   tickprefix = "$", tickfont = list(size = 11),
+                   zeroline = FALSE, showline = FALSE),
+      font = list(color = "#e2e8f0", family = "Inter, sans-serif"),
+      legend = list(orientation = "h", y = -0.12,
+                    font = list(color = "#94a3b8", size = 12, family = "Inter, sans-serif")),
+      margin = list(t = 50, b = 60),
+      hovermode = "x unified"
+    )
+
+    if (chart_mode == "candle") {
+      p <- plot_ly(sub, x = ~Date, open = ~Open, high = ~High, low = ~Low, close = ~Close,
+                   type = "candlestick", name = "OHLC",
+                   increasing = list(line = list(color = "#22c55e"), fillcolor = "rgba(34,197,94,0.35)"),
+                   decreasing = list(line = list(color = "#ef4444"), fillcolor = "rgba(239,68,68,0.35)"))
+      do.call(layout, c(list(p), common_layout))
+    } else {
+      x <- sub$Date; y <- sub$Close
+      first <- head(y, 1); last <- tail(y, 1)
+      p <- plot_ly(sub, x = x, y = y, type = "scatter", mode = "lines",
+                   name = "Close", line = list(color = "#60a5fa", width = 3)) |>
+        add_trace(x = x, y = y, type = "scatter", mode = "markers",
+                  marker = list(color = "#93c5fd", size = 4), showlegend = FALSE, name = "Points") |>
+        add_trace(x = x[1], y = first, type = "scatter", mode = "markers",
+                  marker = list(color = "#34d399", size = 8), name = "Start") |>
+        add_trace(x = x[length(x)], y = last, type = "scatter", mode = "markers",
+                  marker = list(color = "#f97316", size = 8), name = "End")
+      do.call(layout, c(list(p), common_layout))
+    }
   })
 
   # ----------------------------
@@ -332,18 +346,32 @@ server <- function(input, output, session) {
     local_ts <- format(ts, "%Y-%m-%d %H:%M", tz = "America/New_York")
     local_hm <- format(ts, "%H:%M", tz = "America/New_York")
     shown$Published <- ifelse(local_hm == "00:00", format(ts, "%Y-%m-%d", tz = "America/New_York"), paste0(local_ts, " ET"))
-    url <- as.character(shown$Url)
-    needs_search <- grepl("^https?://finnhub\\.io/api/news\\?id=", url)
-    q <- utils::URLencode(paste0(shown$Title, " ", shown$Source), reserved = TRUE)
-    url[needs_search] <- paste0("https://news.google.com/search?q=", q[needs_search])
+    url <- if ("Url" %in% names(shown)) as.character(shown$Url) else rep("", nrow(shown))
+    url[is.na(url)] <- ""
+    needs_search <- !nzchar(url) | grepl("^https?://finnhub\\.io/api/news\\?id=", url)
+    short_title <- substr(shown$Title, 1, 80)
+    q <- utils::URLencode(paste0(short_title, " ", shown$Source), reserved = TRUE)
+    url[needs_search] <- paste0("https://www.google.com/search?q=", q[needs_search])
     shown$Link <- sprintf('<a href="%s" target="_blank" rel="noopener noreferrer" style="color:#38bdf8">Open</a>', url)
 
     datatable(
       shown[, c("Symbol", "Published", "Title", "Source", "Link")],
       rownames = FALSE, escape = FALSE,
-      options = list(dom = "tip", pageLength = 20, autoWidth = TRUE, order = list(list(1, 'desc'))),
+      options = list(
+        dom = "tip", pageLength = 20, autoWidth = FALSE,
+        order = list(list(1, 'desc')),
+        columnDefs = list(
+          list(targets = 0, width = "70px"),
+          list(targets = 1, width = "150px"),
+          list(targets = 2, width = "400px"),
+          list(targets = 3, width = "80px"),
+          list(targets = 4, width = "50px")
+        )
+      ),
       selection = "none"
-    ) |> formatStyle("Symbol", `font-weight` = "bold", color = "#e2e8f0")
+    ) |>
+      formatStyle("Symbol", `font-weight` = "bold", color = "#e2e8f0") |>
+      formatStyle("Title", `white-space` = "normal", `word-wrap` = "break-word", `line-height` = "1.4")
   })
 
   # ----------------------------
@@ -385,24 +413,31 @@ server <- function(input, output, session) {
     }
 
     output$ai_error <- renderUI(NULL)
-    ai_payload(NULL)
-    report_result(NULL)
+    ai_payload(list(
+      symbol = sym, window = n_window, trend = trend,
+      gbm = gbm, gbm_path = gbm_path,
+      lattice = lattice, lattice_path = lattice_path
+    ))
 
+    cache <- report_cache()
+    cache_key <- paste0(sym, "_", n_window, "_", Sys.Date())
+    if (!is.null(cache[[cache_key]])) {
+      report_result(cache[[cache_key]])
+      showNotification(paste("Report loaded from cache (", sym, "today)"), type = "message", duration = 3)
+      return()
+    }
+
+    report_result(NULL)
     withProgress(message = paste("Generating report for", sym), value = 0, {
       setProgress(0.05, detail = "Computing quantitative models...")
-      ai_payload(list(
-        symbol = sym, window = n_window, trend = trend,
-        gbm = gbm, gbm_path = gbm_path,
-        lattice = lattice, lattice_path = lattice_path
-      ))
-
-      setProgress(0.15, detail = "Analyzing with 6 specialist analysts...")
-      result <- generate_stock_report(sym, d, news_data())
-
-      setProgress(0.85, detail = "Synthesizing final report...")
+      progress_cb <- function(value, detail) setProgress(value, detail = detail)
+      result <- generate_stock_report(sym, d, news_data(), on_progress = progress_cb)
 
       if (!isTRUE(result$ok)) {
         output$ai_error <- renderUI(div(class = "alert alert-danger", result$error %||% "Report generation failed."))
+      } else {
+        cache[[cache_key]] <- result
+        report_cache(cache)
       }
       report_result(result)
       setProgress(1, detail = "Report complete")
@@ -488,6 +523,23 @@ server <- function(input, output, session) {
   observeEvent(input$report_info_btn, {
     showModal(render_rating_info_modal())
   })
+
+  output$download_report <- downloadHandler(
+    filename = function() {
+      result <- report_result()
+      sym <- if (!is.null(result)) result$symbol else "report"
+      paste0("report_", sym, "_", Sys.Date(), ".html")
+    },
+    content = function(file) {
+      result <- report_result()
+      if (is.null(result) || !isTRUE(result$ok)) {
+        writeLines("<html><body><h2>No report available. Generate a report first.</h2></body></html>", file)
+        return()
+      }
+      html <- build_report_download_html(result)
+      writeLines(html, file, useBytes = TRUE)
+    }
+  )
 
   # ----------------------------
   # Analytics tables & download
