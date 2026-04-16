@@ -1,0 +1,8 @@
+"ticker","company","sector","share_price","target_price","market_cap_bn","volume_mn_shares","free_float_pct","dividend_yield_pct","net_debt_equity_pct","fwd_pe","pb","roe_pct","beta","pe_ttm","book_value","eps_ttm","fifty_two_wk_high","fifty_two_wk_low","fetch_date"
+"AAPL","Apple","Information Technology",260.78,296.12,3828.5,47.1,99.8,0.4,102.6,27.9,43.4,152,1.11,33,6,7.89,288.62,189.81,"2026-04-11"
+"TSLA","Tesla","Consumer Discretionary",348.95,416.15,1309.4,61.6,75,0,17.8,127.8,15.9,4.9,1.92,323.1,21.9,1.08,498.83,222.79,"2026-04-11"
+"META","Meta","Communication Services",728.46,860.25,1593.3,16.4,99.9,0.33,39.2,17.6,7.3,30.2,1.31,26.7,85.87,23.56,796.25,479.8,"2026-04-11"
+"NVDA","NVIDIA","Information Technology",188.67,268.22,4584.7,178.6,96,0.02,7.3,17,29.1,101.5,2.34,38.6,6.47,4.89,212.19,95.04,"2026-04-11"
+"GOOGL","Alphabet","Communication Services",659.16,376.29,3837.7,33.7,186.1,0.26,16.1,23.6,9.2,35.7,1.13,29.4,34.35,10.8,349,146.1,"2026-04-11"
+"AMZN","Amazon","Consumer Discretionary",238.38,281.27,2563.6,50.8,90.7,0,43.4,25.4,6.2,22.3,1.38,33.2,38.31,7.17,258.6,165.29,"2026-04-11"
+"MSFT","Microsoft","Information Technology",371.21,587.31,2756.4,36.7,99.9,0.93,31.5,19.7,7,34.4,1.11,23.2,52.62,15.97,555.45,355.67,"2026-04-11"
